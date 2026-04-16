@@ -1,9 +1,8 @@
-streamlit==1.32.0
-numpy==1.26.4
-matplotlib==3.7.1
-folium==0.15.1
-streamlit-folium==0.15.0
-earthengine-api==0.1.388
+streamlit
+folium
+streamlit-folium
+matplotlib
+earthengine-api
 rasterio
 
 
