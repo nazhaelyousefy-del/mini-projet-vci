@@ -3,8 +3,12 @@ import numpy as np
 import requests  #télécharger des données depuis une URL
 import io #lire les données en mémoire (sans fichier sur disque)
 
-ee.Initialize(project="secheresse1")
+#ee.Initialize(project="secheresse1")
 
+import ee
+
+if not ee.data._credentials:
+    ee.Initialize()
 # =========================
 # ROI
 # =========================
