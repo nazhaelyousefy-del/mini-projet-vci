@@ -1,95 +1,117 @@
 import streamlit as st
-import matplotlib.pyplot as plt
-import numpy as np
 import folium
 from streamlit_folium import st_folium
 import ee
+import processing
+import numpy as np
+import pandas as pd
 
-from processing import load_vci, classify_vci
+st.set_page_config(page_title="VCI App", layout="wide")
+st.title("🌍 Carte de sécheresse VCI")
 
-st.set_page_config(page_title="Carte de sécheresse (VCI)", layout="wide")
+# =========================
+# INPUT
+# =========================
+year = st.selectbox("Année", [2021, 2022, 2023])
+month = st.slider("Mois", 1, 12, 1)
 
-st.title("🌍 Carte de sécheresse basée sur le VCI")
+roi = processing.get_roi()
 
-# Choix du mois
-month = st.slider("Choisir le mois", min_value=1, max_value=12, value=1)
+# =========================
+# VCI & NDVI
+# =========================
+vci_image = processing.compute_vci_gee(year, month)
+ndvi_image = processing.compute_ndvi_gee(year, month)
 
-# Chargement des données
-vci = load_vci(month)
-classified = classify_vci(vci)
+vci_array = processing.gee_to_numpy(vci_image, roi)
+ndvi_array = processing.gee_to_numpy(ndvi_image, roi)
 
-# Affichage des cartes
-col1, col2 = st.columns(2)
+corr = processing.vci_ndvi_correlation(vci_array, ndvi_array)
 
-with col1:
-    st.subheader("Carte VCI")
-    fig, ax = plt.subplots(figsize=(6, 5))
-    cax = ax.imshow(vci, cmap="RdYlGn", vmin=0, vmax=100)
-    ax.set_title(f"VCI - Mois {month}")
-    ax.axis("off")
-    fig.colorbar(cax, ax=ax, fraction=0.046, pad=0.04)
-    fig.tight_layout()
-    st.pyplot(fig)
+st.metric("Corrélation VCI / NDVI", round(corr, 3))
 
-with col2:
-    st.subheader("Carte de classification de la sécheresse")
-    fig2, ax2 = plt.subplots(figsize=(6, 5))
-    cax2 = ax2.imshow(classified, cmap="RdYlGn_r", vmin=1, vmax=4)
-    ax2.set_title(f"Classes de sécheresse - Mois {month}")
-    ax2.axis("off")
-    fig2.colorbar(cax2, ax=ax2, fraction=0.046, pad=0.04)
-    fig2.tight_layout()
-    st.pyplot(fig2)
+# =========================
+# IMAGE VCI
+# =========================
+st.subheader("Carte VCI")
 
-# Evolution mensuelle du VCI
-st.subheader("📊 Évolution mensuelle moyenne du VCI")
+url = processing.get_vci_png_url(vci_image, roi)
+st.image(url, width=600)
 
-vci_means = []
-for month_idx in range(1, 13):
-    v = load_vci(month_idx)
-    vci_means.append(np.nanmean(v))
+# =========================
+# STATS
+# =========================
+st.subheader("Statistiques")
 
-st.line_chart(vci_means)
+stats = processing.compute_stats_from_vci(vci_array)
 
-# Carte interactive
-st.subheader("🗺️ Carte interactive de la zone d'étude")
+st.write(stats)
 
-try:
-    ee.Initialize(project="secheresse1")
+# =========================
+# 3 ANS EVOLUTION
+# =========================
+years = [2021, 2022, 2023]
+values = []
 
-    admin = ee.FeatureCollection("FAO/GAUL/2015/level2")
+for y in years:
+    img = processing.compute_vci_gee(y, month)
+    arr = processing.gee_to_numpy(img, roi)
+    values.append(np.nanmean(arr))
 
-    roi = admin.filter(
-        ee.Filter.And(
-            ee.Filter.eq("ADM0_NAME", "Morocco"),
-            ee.Filter.stringContains("ADM2_NAME", "Fès")
+df = pd.DataFrame({
+    "Année": years,
+    "VCI": values
+})
+
+st.subheader("Évolution 3 ans")
+st.line_chart(df.set_index("Année"))
+
+# =========================
+# MAP
+# =========================
+centroid = roi.centroid().getInfo()["coordinates"]
+
+m = folium.Map(location=[centroid[1], centroid[0]], zoom_start=8)
+
+map_id = vci_image.getMapId({
+    "min": 0,
+    "max": 100,
+    "palette": ["red", "yellow", "green"]
+})
+
+folium.TileLayer(
+    tiles=map_id["tile_fetcher"].url_format,
+    attr="GEE",
+    name="VCI"
+).add_to(m)
+
+folium.LayerControl().add_to(m)
+
+st_folium(m, width=900, height=500)
+
+
+
+st.subheader("📥 Télécharger VCI")
+
+if st.button("⬇️ Télécharger GeoTIFF"):
+
+    try:
+        region = roi
+
+        url, filename = processing.get_vci_download_url(
+            vci_image,
+            region,
+            year,
+            month
         )
-    )
 
-    roi_geojson = roi.getInfo()
+        st.success("Téléchargement prêt")
 
-    geom = roi.geometry()
-    centroid = geom.centroid().getInfo()
-    coords = centroid["coordinates"]
+        st.markdown(f"""
+        ### 📥 Fichier : **{filename}.tif**
+        👉 [Clique ici pour télécharger]({url})
+        """)
 
-    lat = coords[1]
-    lon = coords[0]
-
-    folium_map = folium.Map(location=[lat, lon], zoom_start=8)
-
-    folium.GeoJson(
-        roi_geojson,
-        name="Zone d'étude",
-        style_function=lambda x: {
-            "fillColor": "blue",
-            "color": "red",
-            "weight": 2,
-            "fillOpacity": 0.1,
-        },
-    ).add_to(folium_map)
-
-    st_folium(folium_map, width=900, height=500)
-
-except Exception as e:
-    st.warning("La carte interactive Earth Engine n'a pas pu être chargée.")
-    st.error(str(e))
+    except Exception as e:
+        st.error("Erreur téléchargement")
+        st.error(str(e))

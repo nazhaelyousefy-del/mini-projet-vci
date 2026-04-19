@@ -1,11 +1,19 @@
+#streamlit
+#folium
+#streamlit-folium
+#matplotlib
+#earthengine-api
+#rasterio
+
+
+
 streamlit
 folium
 streamlit-folium
-matplotlib
+numpy
+pandas
 earthengine-api
-rasterio
-
-
+requests
 
 
 
